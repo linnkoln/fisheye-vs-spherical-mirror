@@ -10,7 +10,7 @@
 
 ![Настоящий кадр HTML-приложения: слева проекция fish-eye, справа отражение в зеркальном шаре](docs/app-overview.png)
 
-[Смотреть видеодемонстрацию с настройками (2:15, MP4)](https://linnkoln.github.io/fisheye-vs-spherical-mirror/docs/demo-video.mp4).
+[Смотреть видеодемонстрацию с настройками (2:15, MP4)](https://linnkoln.github.io/fisheye-vs-spherical-mirror/docs/demo-video.mp4?v=demo-only).
 
 ![Кадр приложения с включённой границей 90 градусов](docs/app-boundary.png)
 
