@@ -10,7 +10,7 @@
 
 ![Настоящий кадр HTML-приложения: слева проекция fish-eye, справа отражение в зеркальном шаре](docs/app-overview.png)
 
-[Смотреть видеодемонстрацию с настройками (2:34, MP4)](https://linnkoln.github.io/fisheye-vs-spherical-mirror/docs/demo-video.mp4). В конце записи показан и [связанный график проекций](https://github.com/linnkoln/fisheye-projection-guide).
+[Смотреть видеодемонстрацию с настройками (2:15, MP4)](https://linnkoln.github.io/fisheye-vs-spherical-mirror/docs/demo-video.mp4).
 
 ![Кадр приложения с включённой границей 90 градусов](docs/app-boundary.png)
 
@@ -49,7 +49,7 @@
 
 - `index.html` — исходная автономная демонстрация: HTML, CSS, JavaScript и GLSL в одном файле.
 - `docs/app-overview.png`, `docs/app-boundary.png` — кадры настоящего приложения из видеозаписи.
-- `docs/demo-video.mp4` — видеодемонстрация работы приложения и связанного графика.
+- `docs/demo-video.mp4` — видеодемонстрация работы приложения.
 - `docs/scene-setup.png` — схема двух установок, созданная для этого репозитория.
 - `docs/metro-before.jpg`, `docs/metro-after.jpg`, `docs/metro-final.jpg` — этапы авторского рисунка, для которого использовался визуализатор.
 
