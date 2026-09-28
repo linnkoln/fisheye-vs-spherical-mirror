@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Fish-Eye vs Зеркальная Сфера (Ray Tracing)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background-color: #111;
+            color: #eee;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            cursor: grab;
+        }
+        #canvas-container:active { cursor: grabbing; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        .marker {
+            position: absolute;
+            pointer-events: none;
+            display: none;
+            z-index: 15;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 6px rgba(0,0,0,0.9);
+        }
+        #marker1 { background: #ffdd00; border: 1px solid #000; }
+        #marker2 { background: #00ddff; border: 1px solid #000; }
+
+        #divider {
+            position: absolute;
+            top: 0; bottom: 0; left: 50%;
+            width: 2px;
+            background: rgba(255, 255, 255, 0.3);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #toggle-ui-btn {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 30;
+            background: rgba(20, 20, 20, 0.8);
+            color: #0ff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            width: 36px;
+            height: 36px;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+        #toggle-ui-btn:hover { background: #333; }
+
+        #ui {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(20, 20, 20, 0.85);
+            padding: 20px;
+            padding-top: 40px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            backdrop-filter: blur(5px);
+            z-index: 20;
+            width: 320px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+        }
+        #ui.hidden {
+            transform: translateX(calc(-100% - 40px));
+        }
+        
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] { -moz-appearance: textfield; }
+        
+        .control-group { margin-bottom: 12px; }
+        .control-group label { display: block; margin-bottom: 4px; font-size: 13px; }
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .slider-row input[type=range] { flex-grow: 1; }
+        input[type=number] {
+            width: 52px;
+            background: #222;
+            color: #0ff;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 3px 5px;
+            font-size: 12px;
+            text-align: right;
+            font-family: inherit;
+        }
+        input[type=number]:focus { outline: 1px solid #0ff; }
+        select {
+            width: 100%;
+            background: #222;
+            color: #0ff;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 6px 5px;
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        select:focus { outline: 1px solid #0ff; }
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            width: 100%;
+            margin-top: 10px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #444; }
+        button.active {
+            background: #005f5f;
+            border-color: #0ff;
+            color: #fff;
+        }
+        .radio-group label, .checkbox-group label { display: inline; margin-right: 10px; cursor: pointer; font-size: 13px; }
+        .info-text {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+        .section-title {
+            font-size: 13px;
+            color: #0ff;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+            margin-bottom: 8px;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <canvas id="glCanvas"></canvas>
+        <div id="marker1" class="marker"></div>
+        <div id="marker2" class="marker"></div>
+        <div id="divider"></div>
+    </div>
+
+    <button id="toggle-ui-btn" title="Скрыть/Показать меню">☰</button>
+
+    <div id="ui">
+        <div class="control-group">
+            <label>Focal Length (Dolly Zoom)</label>
+            <div class="slider-row">
+                <input type="range" id="focal" min="1" max="350" value="35" step="1">
+                <input type="number" id="focalNum" min="1" max="350" value="35" step="1"> <span>mm</span>
+            </div>
+        </div>
+        
+        <div class="section-title">Fish-Eye Камера</div>
+        <div class="control-group">
+            <label>Тип проекции</label>
+            <select id="fisheyeType">
+                <option value="0">Равноугольная (Equidistant)</option>
+                <option value="1">Ортографическая (Orthographic)</option>
+                <option value="2">Равноплощадная (Equisolid)</option>
+                <option value="3">Стереографическая (Stereographic)</option>
+                <option value="4">Перспективная (Perspective)</option>
+            </select>
+            <div class="info-text">Меняет формулу искажения и маску объектива.</div>
+        </div>
+        <div class="control-group">
+            <label>Fish-Eye Zoom (Crop)</label>
+            <div class="slider-row">
+                <input type="range" id="zoom" min="0.3" max="3.0" value="1.0" step="0.1">
+                <input type="number" id="zoomNum" min="0.3" max="3.0" value="1.0" step="0.1"> <span>x</span>
+            </div>
+            <div class="info-text">Увеличение кривизны краев. &lt; 1: все в кадре. &gt; 1: край выходит за экран.</div>
+        </div>
+
+        <div class="section-title">Общая камера</div>
+        <div class="control-group">
+            <label>Pitch</label>
+            <div class="slider-row">
+                <input type="range" id="pitch" min="-90" max="90" value="0" step="0.5">
+                <input type="number" id="pitchNum" min="-90" max="90" value="0" step="0.5"> <span>°</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Yaw</label>
+            <div class="slider-row">
+                <input type="range" id="yaw" min="-90" max="90" value="0" step="0.5">
+                <input type="number" id="yawNum" min="-90" max="90" value="0" step="0.5"> <span>°</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Sphere Radius</label>
+            <div class="slider-row">
+                <input type="range" id="radius" min="0.2" max="3.0" value="1.0" step="0.1">
+                <input type="number" id="radiusNum" min="0.2" max="3.0" value="1.0" step="0.1">
+            </div>
+        </div>
+        
+        <div class="section-title">Стиль стен</div>
+        <div class="control-group radio-group">
+            <label><input type="radio" name="pattern" value="0" checked> Клетка</label>
+            <label><input type="radio" name="pattern" value="1"> Полосы</label>
+        </div>
+        <div class="control-group">
+            <label>Размер паттерна</label>
+            <div class="slider-row">
+                <input type="range" id="patternSize" min="0.1" max="5.0" value="1.0" step="0.1">
+                <input type="number" id="patternSizeNum" min="0.1" max="5.0" value="1.0" step="0.1">
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Поворот паттерна</label>
+            <div class="slider-row">
+                <input type="range" id="patternRot" min="0" max="90" value="0" step="1">
+                <input type="number" id="patternRotNum" min="0" max="90" value="0" step="1"> <span>°</span>
+            </div>
+        </div>
+
+        <div class="section-title">Окружение</div>
+        <div class="control-group radio-group">
+            <label>Стены:</label><br>
+            <label><input type="radio" name="walls" value="0" checked> Обе</label>
+            <label><input type="radio" name="walls" value="1"> Передняя</label>
+            <label><input type="radio" name="walls" value="2"> Задняя</label>
+        </div>
+        <div class="control-group">
+            <label>Затухание вдаль</label>
+            <div class="slider-row">
+                <input type="range" id="fog" min="0.0" max="3.0" value="0.5" step="0.01">
+                <input type="number" id="fogNum" min="0.0" max="3.0" value="0.5" step="0.01">
+            </div>
+            <div class="info-text">Нюансная регулировка вблизи нуля (шаг 0.01).</div>
+        </div>
+
+        <div class="control-group checkbox-group">
+            <input type="checkbox" id="showHorizon"> <label for="showHorizon">Линия горизонта</label>
+        </div>
+        
+        <button id="eqBtn">Показать границу 90°</button>
+
+        <div class="section-title">Маркеры сравнения</div>
+        <div class="control-group">
+            <label>Тип симметрии</label>
+            <select id="symmetryType">
+                <option value="0">Центральная (относительно делителя)</option>
+                <option value="1">Горизонтальная (по высоте экрана)</option>
+                <option value="2">Вертикальная (по ширине экрана)</option>
+                <option value="3">Диагональная</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Размер маркеров</label>
+            <div class="slider-row">
+                <input type="range" id="markerSize" min="4" max="40" value="8" step="1">
+                <input type="number" id="markerSizeNum" min="4" max="40" value="8" step="1"> <span>px</span>
+            </div>
+        </div>
+        <button id="clearMarkersBtn">Стереть маркеры</button>
+
+        <div class="info-text" style="margin-top: 15px;">Клик по экрану ставит симметричные маркеры. Тащить мышью — вращать.</div>
+        
+        <button id="resetBtn">Reset View</button>
+    </div>
+
+    <script id="vertexShader" type="x-shader/x-vertex">
+        attribute vec2 aPosition;
+        void main() {
+            gl_Position = vec4(aPosition, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        precision highp float;
+        
+        uniform vec2 uResolution;
+        uniform float uYaw;
+        uniform float uPitch;
+        uniform float uFocalLength;
+        uniform float uFishZoom;
+        uniform float uSphereRadius;
+        uniform float uShowHorizon;
+        uniform float uFogStrength;
+        uniform float uPatternSize;
+        uniform float uPatternRot;
+        uniform float uShowEq;
+        uniform int uWallMode;
+        uniform int uPattern;
+        uniform int uFisheyeType;
+
+        const float PI = 3.14159265359;
+        const float HALF_PI = PI / 2.0;
+        const float WALL_DIST = 8.0; 
+        const float SPHERE_Z = 0.0;  
+
+        vec3 rotate(vec3 v, float yaw, float pitch) {
+            float cy = cos(yaw), sy = sin(yaw);
+            float cp = cos(pitch), sp = sin(pitch);
+            vec3 v1 = vec3(cy * v.x + sy * v.z, v.y, -sy * v.x + cy * v.z);
+            vec3 v2 = vec3(v1.x, cp * v1.y - sp * v1.z, sp * v1.y + cp * v1.z);
+            return v2;
+        }
+
+        vec2 rot2D(vec2 p, float a) {
+            float c = cos(a), s = sin(a);
+            return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+        }
+
+        vec3 patternColor(vec3 pos) {
+            vec2 p = vec2(pos.x, pos.y);
+            p /= max(uPatternSize, 0.01);
+            p = rot2D(p, uPatternRot * PI / 180.0);
+            
+            float h = floor(p.x); 
+            float v = floor(p.y); 
+            float cH = mod(h, 2.0); 
+            float cV = mod(v, 2.0);
+            
+            vec3 col1 = vec3(0.15);
+            vec3 col2 = vec3(0.85);
+            
+            float c;
+            if (uPattern == 0) {
+                c = mod(cH + cV, 2.0);
+            } else {
+                c = cH;
+            }
+            
+            vec3 color = mix(col1, col2, c);
+            
+            float dist = length(pos.xz);
+            float fog = 1.0 / (1.0 + dist * dist * 0.02 * uFogStrength);
+            color *= fog;
+            
+            return color;
+        }
+
+        vec3 traceWalls(vec3 ro, vec3 rd) {
+            vec3 color = vec3(0.0);
+            
+            if (uWallMode == 0 || uWallMode == 1) {
+                float t = (WALL_DIST - ro.z) / rd.z;
+                if (t > 0.0 && rd.z > 0.0) {
+                    vec3 p = ro + rd * t;
+                    color += patternColor(p) * 1.0;
+                }
+            }
+            
+            if (uWallMode == 0 || uWallMode == 2) {
+                float t = (-WALL_DIST - ro.z) / rd.z;
+                if (t > 0.0 && rd.z < 0.0) {
+                    vec3 p = ro + rd * t;
+                    color += patternColor(p) * 0.8;
+                }
+            }
+            return color;
+        }
+
+        vec2 intersectSphere(vec3 ro, vec3 rd, vec3 center, float radius) {
+            vec3 oc = ro - center;
+            float b = dot(oc, rd);
+            float c = dot(oc, oc) - radius * radius;
+            float h = b * b - c;
+            if (h < 0.0) return vec2(-1.0);
+            h = sqrt(h);
+            return vec2(-b - h, -b + h);
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy / uResolution.xy) * 2.0 - 1.0;
+            float aspect = uResolution.x / uResolution.y;
+            uv.x *= aspect;
+            
+            float screenX = gl_FragCoord.x / uResolution.x;
+            bool isFishEye = screenX < 0.5;
+            
+            float baseFocal = 35.0;
+            float baseDist = 5.0; 
+            float dist = baseDist * (uFocalLength / baseFocal);
+            
+            float sensorWidth = 36.0;
+            float fov = 2.0 * atan(sensorWidth / (2.0 * uFocalLength));
+            float tanFov = tan(fov * 0.5);
+            
+            vec3 camPosBase = vec3(0.0, 0.0, -dist);
+            vec3 camPos = rotate(camPosBase, uYaw, uPitch);
+            
+            vec3 finalColor = vec3(0.0);
+            
+            if (isFishEye) {
+                float maxR = 1.0 / uFishZoom;
+                float r = length(uv);
+                
+                bool isMasked = false;
+                
+                if (uFisheyeType == 0 || uFisheyeType == 1) {
+                    if (r >= maxR) isMasked = true;
+                } 
+                // Убрано затемнение для Равноплощадной (Equisolid). Излом теперь полностью виден.
+                else if (uFisheyeType == 2) {
+                    if (r > maxR) isMasked = true;
+                }
+
+                if (!isMasked) {
+                    float normR = r / maxR;
+                    vec2 dir2D = r > 0.0001 ? normalize(uv) : vec2(0.0);
+                    
+                    float theta = 0.0;
+
+                    if (uFisheyeType == 0) {
+                        // Эквидистантная: r ∝ θ → нормировка θ = (π/2) * normR
+                        theta = normR * HALF_PI;
+                    }
+                    else if (uFisheyeType == 1) {
+                        // Ортографическая: r = f*sinθ; f = maxR → sinθ = normR
+                        theta = asin(clamp(normR, -1.0, 1.0));
+                    }
+                    else if (uFisheyeType == 2) {
+                        // Равнотелесная: r = 2f*sin(θ/2); f = maxR/√2 → sin(θ/2) = normR/√2
+                        float sinHalf = clamp(normR / 1.41421356, -1.0, 1.0);
+                        theta = 2.0 * asin(sinHalf);
+                    }
+                    else if (uFisheyeType == 3) {
+                        // Стереографическая: r = 2f*tan(θ/2); f = maxR/2 → tan(θ/2) = normR
+                        theta = 2.0 * atan(normR);
+                    }
+                    else if (uFisheyeType == 4) {
+                        // Rectilinear: оставлено как есть (θ = atan(normR))
+                        theta = atan(normR);
+                    }
+                    
+                    vec3 localDir = normalize(vec3(dir2D * sin(theta), cos(theta)));
+                    vec3 rayDir = rotate(localDir, uYaw, uPitch);
+                    
+                    finalColor = traceWalls(camPos, rayDir);
+                } else {
+                    finalColor = vec3(0.02);
+                }
+            } else {
+                vec3 localDir = normalize(vec3(uv.x * tanFov, uv.y * tanFov, 1.0));
+                vec3 perspDir = rotate(localDir, uYaw, uPitch);
+                
+                vec2 sphHit = intersectSphere(camPos, perspDir, vec3(0.0, 0.0, SPHERE_Z), uSphereRadius);
+                
+                if (sphHit.x > 0.0) {
+                    vec3 hitPos = camPos + perspDir * sphHit.x;
+                    vec3 normal = normalize(hitPos - vec3(0.0, 0.0, SPHERE_Z));
+                    vec3 reflectDir = reflect(perspDir, normal);
+                    finalColor = traceWalls(hitPos, reflectDir);
+                    
+                    if (uShowEq > 0.5) {
+                        float R = uSphereRadius;
+                        float L = length(camPos); 
+                        float R2 = R * R;
+                        float L2 = L * L;
+                        
+                        float y_eq = (R2 + R * sqrt(R2 + 8.0 * L2)) / (4.0 * L);
+                        float x_eq = sqrt(max(0.0, R2 - y_eq * y_eq));
+                        
+                        float denom = R * (L - y_eq);
+                        float ratio = 0.0;
+                        if (denom > 0.001) {
+                            ratio = (x_eq * sqrt(max(0.0, L2 - R2))) / denom;
+                        }
+                        
+                        vec3 edgeDir = normalize(vec3(R, 0.0, sqrt(max(0.0, L2 - R2))));
+                        vec3 edgeRot = rotate(edgeDir, 0.0, 0.0);
+                        float u_edge = length(edgeRot.xy) / edgeRot.z / tanFov;
+                        
+                        float u_p = u_edge * ratio;
+                        
+                        float distToLine = length(uv) - u_p;
+                        
+                        float line = 1.0 - smoothstep(0.0, 0.003, abs(distToLine));
+                        float glow = exp(-abs(distToLine) * 150.0) * 0.6; 
+                        
+                        finalColor = mix(finalColor, vec3(1.0, 0.2, 0.0), glow);
+                        finalColor = mix(finalColor, vec3(1.0, 1.0, 0.2), line);
+                    }
+                } else {
+                    finalColor = traceWalls(camPos, perspDir);
+                }
+            }
+            
+            if (uShowHorizon > 0.5) {
+                if (isFishEye) {
+                    if (length(uv) < 0.005) finalColor = vec3(1.0, 0.0, 0.0);
+                } else {
+                    if (abs(uv.y) < 0.005) finalColor = vec3(1.0, 0.0, 0.0);
+                }
+            }
+            
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+        
+        if (!gl) {
+            alert('WebGL не поддерживается вашим браузером');
+        }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vsSource = document.getElementById('vertexShader').text;
+        const fsSource = document.getElementById('fragmentShader').text;
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error(gl.getProgramInfoLog(program));
+        }
+
+        gl.useProgram(program);
+
+        const positions = new Float32Array([
+            -1, -1,  1, -1,  -1, 1,
+            -1,  1,  1, -1,   1, 1
+        ]);
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+        const aPosition = gl.getAttribLocation(program, 'aPosition');
+        gl.enableVertexAttribArray(aPosition);
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+
+        const uResolution = gl.getUniformLocation(program, 'uResolution');
+        const uYaw = gl.getUniformLocation(program, 'uYaw');
+        const uPitch = gl.getUniformLocation(program, 'uPitch');
+        const uFocalLength = gl.getUniformLocation(program, 'uFocalLength');
+        const uFishZoom = gl.getUniformLocation(program, 'uFishZoom');
+        const uSphereRadius = gl.getUniformLocation(program, 'uSphereRadius');
+        const uShowHorizon = gl.getUniformLocation(program, 'uShowHorizon');
+        const uFogStrength = gl.getUniformLocation(program, 'uFogStrength');
+        const uPatternSize = gl.getUniformLocation(program, 'uPatternSize');
+        const uPatternRot = gl.getUniformLocation(program, 'uPatternRot');
+        const uShowEq = gl.getUniformLocation(program, 'uShowEq');
+        const uWallMode = gl.getUniformLocation(program, 'uWallMode');
+        const uPattern = gl.getUniformLocation(program, 'uPattern');
+        const uFisheyeType = gl.getUniformLocation(program, 'uFisheyeType');
+
+        let state = {
+            yaw: 0.0,
+            pitch: 0.0,
+            focal: 35.0,
+            fishZoom: 1.0,
+            radius: 1.0,
+            showHorizon: false,
+            fogStrength: 0.5,
+            patternSize: 1.0,
+            patternRot: 0.0,
+            showEq: 0.0,
+            wallMode: 0,
+            pattern: 0,
+            fisheyeType: 0,
+            markerSize: 8,
+            symmetryType: 0
+        };
+
+        // Логика скрытия UI
+        const toggleBtn = document.getElementById('toggle-ui-btn');
+        const uiPanel = document.getElementById('ui');
+        toggleBtn.addEventListener('click', () => {
+            uiPanel.classList.toggle('hidden');
+            toggleBtn.textContent = uiPanel.classList.contains('hidden') ? '☰' : '✕';
+        });
+
+        function linkInputs(sliderId, numId, stateKey, isDeg = false) {
+            const slider = document.getElementById(sliderId);
+            const num = document.getElementById(numId);
+            
+            slider.addEventListener('input', () => {
+                let val = parseFloat(slider.value);
+                state[stateKey] = isDeg ? val * Math.PI / 180.0 : val;
+                num.value = val;
+                render();
+            });
+            
+            num.addEventListener('input', () => {
+                let val = parseFloat(num.value);
+                if (isNaN(val)) return;
+                val = Math.max(parseFloat(slider.min), Math.min(parseFloat(slider.max), val));
+                state[stateKey] = isDeg ? val * Math.PI / 180.0 : val;
+                slider.value = val;
+                render();
+            });
+            
+            num.addEventListener('blur', () => {
+                let val = parseFloat(num.value);
+                if (isNaN(val)) val = parseFloat(slider.value);
+                val = Math.max(parseFloat(slider.min), Math.min(parseFloat(slider.max), val));
+                state[stateKey] = isDeg ? val * Math.PI / 180.0 : val;
+                slider.value = val;
+                num.value = val;
+                render();
+            });
+        }
+
+        linkInputs('focal', 'focalNum', 'focal');
+        linkInputs('zoom', 'zoomNum', 'fishZoom');
+        linkInputs('pitch', 'pitchNum', 'pitch', true);
+        linkInputs('yaw', 'yawNum', 'yaw', true);
+        linkInputs('radius', 'radiusNum', 'radius');
+        linkInputs('fog', 'fogNum', 'fogStrength');
+        linkInputs('patternSize', 'patternSizeNum', 'patternSize');
+        linkInputs('patternRot', 'patternRotNum', 'patternRot');
+        linkInputs('markerSize', 'markerSizeNum', 'markerSize');
+
+        document.getElementById('fisheyeType').addEventListener('change', (e) => {
+            state.fisheyeType = parseInt(e.target.value);
+            render();
+        });
+
+        document.getElementById('symmetryType').addEventListener('change', (e) => {
+            state.symmetryType = parseInt(e.target.value);
+            // Перерасчет существующей точки при смене типа симметрии, если она есть
+            if (marker1.style.display === 'block') {
+                const x1 = parseFloat(marker1.style.left);
+                const y1 = parseFloat(marker1.style.top);
+                updateMarkers(x1, y1);
+            }
+        });
+
+        const horizonCheckbox = document.getElementById('showHorizon');
+        const wallRadios = document.querySelectorAll('input[name="walls"]');
+        const patternRadios = document.querySelectorAll('input[name="pattern"]');
+        const resetBtn = document.getElementById('resetBtn');
+        const eqBtn = document.getElementById('eqBtn');
+        const clearMarkersBtn = document.getElementById('clearMarkersBtn');
+        const marker1 = document.getElementById('marker1');
+        const marker2 = document.getElementById('marker2');
+
+        horizonCheckbox.addEventListener('change', e => { state.showHorizon = e.target.checked; render(); });
+        
+        wallRadios.forEach(radio => radio.addEventListener('change', e => { state.wallMode = parseInt(e.target.value); render(); }));
+        patternRadios.forEach(radio => radio.addEventListener('change', e => { state.pattern = parseInt(e.target.value); render(); }));
+
+        eqBtn.addEventListener('click', () => {
+            state.showEq = state.showEq > 0.5 ? 0.0 : 1.0;
+            eqBtn.classList.toggle('active', state.showEq > 0.5);
+            render();
+        });
+
+        clearMarkersBtn.addEventListener('click', () => {
+            marker1.style.display = 'none';
+            marker2.style.display = 'none';
+        });
+
+        // Функция корректного расчета и отрисовки симметрии
+        function updateMarkers(x1, y1) {
+            const rect = canvas.getBoundingClientRect();
+            const w = rect.width;
+            const h = rect.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            
+            let x2 = x1;
+            let y2 = y1;
+
+            // Относительные координаты клика от центра (от -1 до 1)
+            const rx = (x1 - cx) / cx; 
+            const ry = (y1 - cy) / cy; 
+
+            if (state.symmetryType === 0) {
+                // Центральная (зеркалим обе координаты)
+                x2 = cx - (x1 - cx);
+                y2 = cy - (y1 - cy);
+            } else if (state.symmetryType === 1) {
+                // Горизонтальная (зеркалим только Y, X остается тем же)
+                x2 = x1;
+                y2 = cy - (y1 - cy);
+            } else if (state.symmetryType === 2) {
+                // Вертикальная (зеркалим только X, Y остается тем же)
+                x2 = cx - (x1 - cx);
+                y2 = y1;
+            } else if (state.symmetryType === 3) {
+                // Диагональная (меняем X и Y местами относительно центра)
+                x2 = cx + ry * cx;
+                y2 = cy + rx * cy;
+            }
+
+            const size = state.markerSize;
+            
+            marker1.style.display = 'block';
+            marker1.style.left = `${x1}px`;
+            marker1.style.top = `${y1}px`;
+            marker1.style.width = `${size}px`;
+            marker1.style.height = `${size}px`;
+            
+            marker2.style.display = 'block';
+            marker2.style.left = `${x2}px`;
+            marker2.style.top = `${y2}px`;
+            marker2.style.width = `${size}px`;
+            marker2.style.height = `${size}px`;
+        }
+
+        resetBtn.addEventListener('click', () => {
+            state.yaw = 0.0; state.pitch = 0.0; state.focal = 35.0; state.radius = 1.0; 
+            state.fishZoom = 1.0; state.fogStrength = 0.5; state.patternSize = 1.0; 
+            state.patternRot = 0.0; state.showEq = 0.0; state.fisheyeType = 0;
+            state.markerSize = 8; state.symmetryType = 0;
+            
+            document.getElementById('focal').value = 35; document.getElementById('focalNum').value = 35;
+            document.getElementById('zoom').value = 1.0; document.getElementById('zoomNum').value = 1.0;
+            document.getElementById('pitch').value = 0; document.getElementById('pitchNum').value = 0;
+            document.getElementById('yaw').value = 0; document.getElementById('yawNum').value = 0;
+            document.getElementById('radius').value = 1.0; document.getElementById('radiusNum').value = 1.0;
+            document.getElementById('fog').value = 0.5; document.getElementById('fogNum').value = 0.5;
+            document.getElementById('patternSize').value = 1.0; document.getElementById('patternSizeNum').value = 1.0;
+            document.getElementById('patternRot').value = 0; document.getElementById('patternRotNum').value = 0;
+            document.getElementById('fisheyeType').value = 0;
+            document.getElementById('markerSize').value = 8; document.getElementById('markerSizeNum').value = 8;
+            document.getElementById('symmetryType').value = 0;
+            
+            horizonCheckbox.checked = false; state.showHorizon = false;
+            eqBtn.classList.remove('active');
+            
+            marker1.style.display = 'none';
+            marker2.style.display = 'none';
+            
+            render();
+        });
+
+        let isDragging = false;
+        let dragMoved = false;
+        let lastX = 0, lastY = 0;
+        
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            dragMoved = false;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+        
+        canvas.addEventListener('click', (e) => {
+            if (dragMoved) return;
+            const x = e.clientX;
+            const y = e.clientY;
+            updateMarkers(x, y);
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            dragMoved = true;
+            
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            
+            state.yaw -= dx * 0.005; 
+            state.pitch -= dy * 0.005;
+            
+            state.pitch = Math.max(-90 * Math.PI / 180, Math.min(90 * Math.PI / 180, state.pitch));
+            state.yaw = Math.max(-90 * Math.PI / 180, Math.min(90 * Math.PI / 180, state.yaw));
+            
+            document.getElementById('yaw').value = (state.yaw * 180 / Math.PI).toFixed(1);
+            document.getElementById('yawNum').value = (state.yaw * 180 / Math.PI).toFixed(1);
+            document.getElementById('pitch').value = (state.pitch * 180 / Math.PI).toFixed(1);
+            document.getElementById('pitchNum').value = (state.pitch * 180 / Math.PI).toFixed(1);
+            
+            lastX = e.clientX;
+            lastY = e.clientY;
+            
+            render();
+        });
+        
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+            setTimeout(() => { dragMoved = false; }, 10);
+        });
+
+        function resize() {
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            render();
+        }
+
+        function render() {
+            gl.uniform2f(uResolution, canvas.width, canvas.height);
+            gl.uniform1f(uYaw, state.yaw);
+            gl.uniform1f(uPitch, state.pitch);
+            gl.uniform1f(uFocalLength, state.focal);
+            gl.uniform1f(uFishZoom, state.fishZoom);
+            gl.uniform1f(uSphereRadius, state.radius);
+            gl.uniform1f(uShowHorizon, state.showHorizon ? 1.0 : 0.0);
+            gl.uniform1f(uFogStrength, state.fogStrength);
+            gl.uniform1f(uPatternSize, state.patternSize);
+            gl.uniform1f(uPatternRot, state.patternRot);
+            gl.uniform1f(uShowEq, state.showEq);
+            gl.uniform1i(uWallMode, state.wallMode);
+            gl.uniform1i(uPattern, state.pattern);
+            gl.uniform1i(uFisheyeType, state.fisheyeType);
+            
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+    </script>
+</body>
+</html>
